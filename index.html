@@ -21,7 +21,7 @@
 <video id="video" playsinline muted preload="metadata" controls hidden></video>
 </section>
 <section class="card">
-<label>② 抽出設定</label>
+<label>② 抽出設定</label><button id="autoTune" class="secondary" disabled>動画から自動設定</button><p id="autoInfo" class="note">動画を選ぶと、自動で適した閾値を計算できます。手動設定もそのまま使えます。</p>
 <div class="row">
 <div class="ctl">判定間隔 <b id="intervalOut">0.30</b>秒<input id="interval" type="range" min=".15" max="1" step=".05" value=".30"></div>
 <div class="ctl">安定感度 <b id="stableOut">3.0</b>%<input id="stable" type="range" min="1" max="10" step=".5" value="3"></div>
@@ -40,5 +40,5 @@
 <div id="results" class="results"></div></section>
 <canvas id="full" hidden></canvas><canvas id="small" hidden></canvas>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="./app.js?v=2"></script>
+<script src="./app.js?v=3"></script>
 </main></body></html>
