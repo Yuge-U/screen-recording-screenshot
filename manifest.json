@@ -1,0 +1,9 @@
+{
+  "name": "画面録画スクショ",
+  "short_name": "録画スクショ",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5f5f7",
+  "theme_color": "#f5f5f7",
+  "description": "iPhoneの画面収録から安定した画面を自動抽出"
+}
