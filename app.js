@@ -21,7 +21,9 @@ stopBtn.onclick=()=>stopped=true;
 async function analyzeBookTarget(target){
 const duration=video.duration;
 const avg=duration/target;
-const probe=Math.max(.06,Math.min(.22,avg/4));
+// 目標より多い候補を作り、あとで重複を落とします。
+const candidateTarget=Math.max(target+20,Math.ceil(target*1.22));
+const probe=Math.max(.05,Math.min(.18,avg/5));
 const frames=[];
 let prev=null;
 const total=Math.ceil(duration/probe);
@@ -31,81 +33,103 @@ const s=sig();
 const d=prev?diff(prev,s):0;
 frames.push({t,s,d});
 prev=s;
-if(n%4===0){
-const p=Math.min(70,Math.round((n+1)/total*70));
+if(n%5===0){
+const p=Math.min(55,Math.round((n+1)/total*55));
 $("progress").value=p;
-$("detail").textContent="スクロール量を追跡 "+p+"%";
+$("detail").textContent="ページ候補を探索 "+p+"%";
 await new Promise(r=>setTimeout(r,0));
 }}
 if(stopped)return 0;
 
-// 変化量を「移動距離」の代用として累積し、スクロール速度の変化に追従します。
-const smooth=[];
-for(let i=0;i<frames.length;i++){
-let sum=0,count=0;
-for(let k=Math.max(0,i-2);k<=Math.min(frames.length-1,i+2);k++){sum+=frames[k].d;count++}
-smooth.push(sum/count);
-}
-let cumulative=[0],acc=0;
-for(let i=1;i<frames.length;i++){
-// 小さな動画ノイズは除き、実際に動いている区間だけ累積します。
-const motion=Math.max(0,smooth[i]-.12);
-acc+=motion;
-cumulative.push(acc);
-}
-// 冒頭・末尾の長い静止区間を解析対象から外します。
-const activeThreshold=Math.max(.18, Math.min(.8, [...smooth].sort((a,b)=>a-b)[Math.floor(smooth.length*.65)]*.35));
+// 動いている範囲だけを特定します。
+const smooth=frames.map((_,i)=>{
+let sum=0,c=0;
+for(let k=Math.max(0,i-2);k<=Math.min(frames.length-1,i+2);k++){sum+=frames[k].d;c++}
+return sum/c;
+});
+const sortedSmooth=[...smooth].sort((a,b)=>a-b);
+const activeThreshold=Math.max(.15,Math.min(.8,(sortedSmooth[Math.floor(sortedSmooth.length*.65)]||.3)*.35));
 let firstActive=0,lastActive=frames.length-1;
 for(let i=0;i<smooth.length;i++){if(smooth[i]>activeThreshold){firstActive=Math.max(0,i-2);break}}
 for(let i=smooth.length-1;i>=0;i--){if(smooth[i]>activeThreshold){lastActive=Math.min(frames.length-1,i+2);break}}
-const baseMotion=cumulative[firstActive]||0;
-const endMotion=cumulative[lastActive]||acc;
-const totalMotion=Math.max(0,endMotion-baseMotion);
-const chosen=[];
 
-if(totalMotion>0.01){
-// 全移動量を目標ページ数で等分し、各ページに相当する移動位置を探します。
-let cursor=0;
-for(let page=0;page<target;page++){
-const wanted=baseMotion+totalMotion*(page+.5)/target;
-if(cursor<firstActive)cursor=firstActive;
-while(cursor<lastActive&&cumulative[cursor]<wanted)cursor++;
-let idx=cursor;
-// 境界付近では変化中のフレームより、少し安定したフレームを優先します。
-const radius=Math.max(1,Math.round(avg/probe*.22));
-let best=idx,bestScore=Infinity;
-for(let j=Math.max(0,idx-radius);j<=Math.min(frames.length-1,idx+radius);j++){
-const motionScore=smooth[j];
-if(j<firstActive||j>lastActive)continue;
-const distancePenalty=Math.abs(cumulative[j]-wanted)/(totalMotion/target+1e-6);
-const score=motionScore+distancePenalty*.35;
+// 移動量を累積します。
+const cum=[0];let acc=0;
+for(let i=1;i<frames.length;i++){acc+=Math.max(0,smooth[i]-.10);cum.push(acc)}
+const base=cum[firstActive]||0,endM=cum[lastActive]||acc,totalM=Math.max(.001,endM-base);
+
+// 目標より22%多い候補を、移動量に沿って取得します。
+const candidates=[];
+let cursor=firstActive;
+for(let k=0;k<candidateTarget;k++){
+const wanted=base+totalM*(k+.5)/candidateTarget;
+while(cursor<lastActive&&cum[cursor]<wanted)cursor++;
+const radius=Math.max(1,Math.round(avg/probe*.12));
+let best=cursor,bestScore=Infinity;
+for(let j=Math.max(firstActive,cursor-radius);j<=Math.min(lastActive,cursor+radius);j++){
+const distance=Math.abs(cum[j]-wanted)/(totalM/candidateTarget+1e-6);
+const score=smooth[j]+distance*.25;
 if(score<bestScore){bestScore=score;best=j}
 }
-chosen.push(frames[best]);
-}
-}else{
-// 動きがほぼ検出できない場合のみ、時間基準へフォールバックします。
-for(let page=0;page<target;page++){
-const t=Math.min(duration-.05,(page+.5)*avg);
-let idx=Math.min(frames.length-1,Math.max(0,Math.round(t/probe)));
-chosen.push(frames[idx]);
-}
+candidates.push(frames[best]);
 }
 
-// 同一時刻が選ばれた場合は近傍へずらし、目標ページ数を維持します。
-for(let i=1;i<chosen.length;i++){
-if(chosen[i].t<=chosen[i-1].t){
-const minT=Math.min(frames[lastActive].t,chosen[i-1].t+probe);
-let idx=Math.min(frames.length-1,Math.max(0,Math.round(minT/probe)));
-chosen[i]=frames[idx];
-}}
-for(let i=0;i<chosen.length&&!stopped;i++){
-await capture(chosen[i].t,chosen[i].s);
-$("progress").value=70+Math.round((i+1)/chosen.length*30);
-$("detail").textContent="ページ画像を作成 "+(i+1)+" / "+target;
+// 本文中心部を使った類似度で隣接重複を判定します。
+// sigは縮小グレースケールなので、上端/下端15%を除外します。
+function centerDiff(a,b){
+const w=small.width,h=small.height,y0=Math.floor(h*.15),y1=Math.ceil(h*.85);
+let sum=0,count=0;
+for(let y=y0;y<y1;y++)for(let x=0;x<w;x++){const i=y*w+x;sum+=Math.abs(a[i]-b[i]);count++}
+return count?sum/count/255*100:100;
+}
+const unique=[];
+const duplicateThreshold=1.15;
+for(const c of candidates){
+if(!unique.length){unique.push(c);continue}
+const last=unique[unique.length-1];
+const visual=centerDiff(last.s,c.s);
+const timeGap=c.t-last.t;
+// 非常に似た隣接画像は重複として統合。長い静止でも1枚だけ残します。
+if(visual<duplicateThreshold&&timeGap<avg*2.5)continue;
+unique.push(c);
+}
+
+// 多すぎる場合は、隣接類似度が最も高い候補から慎重に統合します。
+while(unique.length>target){
+let bestI=-1,bestD=Infinity;
+for(let i=1;i<unique.length;i++){
+const d=centerDiff(unique[i-1].s,unique[i].s);
+if(d<bestD){bestD=d;bestI=i}
+}
+if(bestI<0||bestD>3.2)break;
+unique.splice(bestI,1);
+}
+
+// 少ない場合は、大きな時間ギャップを再探索して候補を補います。
+while(unique.length<target){
+let gapI=-1,gap=-1;
+for(let i=1;i<unique.length;i++){
+const g=unique[i].t-unique[i-1].t;
+if(g>gap){gap=g;gapI=i}
+}
+if(gapI<1||gap<probe*2.2)break;
+const mid=(unique[gapI-1].t+unique[gapI].t)/2;
+let idx=Math.min(frames.length-1,Math.max(0,Math.round(mid/probe)));
+const cand=frames[idx];
+if(centerDiff(unique[gapI-1].s,cand.s)<.65||centerDiff(cand.s,unique[gapI].s)<.65)break;
+unique.splice(gapI,0,cand);
+}
+
+// PDF候補としてユニーク画像だけを表示します。
+for(let i=0;i<unique.length&&!stopped;i++){
+await capture(unique[i].t,unique[i].s);
+$("progress").value=55+Math.round((i+1)/unique.length*45);
+$("detail").textContent="ユニークページ作成 "+(i+1)+" / "+unique.length;
 await new Promise(r=>setTimeout(r,0));
 }
-return chosen.length;
+const duplicates=candidateTarget-unique.length;
+$("detail").textContent="目標 "+target+"ページ / 候補 "+candidateTarget+"枚 / 重複除外 "+duplicates+"枚 / ユニーク "+unique.length+"ページ / 差 "+(unique.length-target);
+return unique.length;
 }
 
 start.onclick=async()=>{stopped=false;start.disabled=true;stopBtn.disabled=false;$("results").innerHTML="";shots.forEach(x=>URL.revokeObjectURL(x.u));shots=[];$("count").textContent="0枚";updatePdfButtons();$("status").textContent=mode==="book"?"本・連続スクロール解析中…":"解析中…";try{
