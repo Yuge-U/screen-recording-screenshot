@@ -27,7 +27,9 @@
 <button id="bookMode" class="secondary">📖 本・連続スクロール</button>
 </div>
 <div id="bookSettings" hidden>
-<p class="note"><b>本モード：</b>画面が止まらなくても一定時間ごとに取得します。連続スクロールの読書録画向けです。</p><button id="bookAutoTune" class="secondary">本モードを自動設定</button><p id="bookAutoInfo" class="note">スクロール速度と画面変化を測定して、取得間隔と最小変化を自動調整します。</p>
+<p class="note"><b>本モード：</b>画面が止まらなくても一定時間ごとに取得します。連続スクロールの読書録画向けです。</p><button id="bookAutoTune" class="secondary">本モードを自動設定</button>
+<div class="ctl" style="margin-top:14px">目標ページ数（任意）<input id="targetPages" type="number" inputmode="numeric" min="1" max="5000" placeholder="例：288" style="width:100%;font-size:18px;padding:12px;border:1px solid #ccc;border-radius:10px;margin-top:6px"></div>
+<p class="note">ページ数が分かる場合は入力すると、その枚数を目標にページ候補を抽出します。</p><p id="bookAutoInfo" class="note">スクロール速度と画面変化を測定して、取得間隔と最小変化を自動調整します。</p>
 <div class="row">
 <div class="ctl">取得間隔 <b id="bookIntervalOut">1.00</b>秒<input id="bookInterval" type="range" min=".30" max="5" step=".10" value="1"></div>
 <div class="ctl">最小変化 <b id="bookChangeOut">1.0</b>%<input id="bookChange" type="range" min=".2" max="8" step=".2" value="1"></div>
@@ -51,5 +53,5 @@
 <div id="results" class="results"></div></section>
 <canvas id="full" hidden></canvas><canvas id="small" hidden></canvas>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="./app.js?v=5"></script>
+<script src="./app.js?v=6"></script>
 </main></body></html>
