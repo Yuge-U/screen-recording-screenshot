@@ -53,21 +53,30 @@ const motion=Math.max(0,smooth[i]-.12);
 acc+=motion;
 cumulative.push(acc);
 }
-const totalMotion=acc;
+// 冒頭・末尾の長い静止区間を解析対象から外します。
+const activeThreshold=Math.max(.18, Math.min(.8, [...smooth].sort((a,b)=>a-b)[Math.floor(smooth.length*.65)]*.35));
+let firstActive=0,lastActive=frames.length-1;
+for(let i=0;i<smooth.length;i++){if(smooth[i]>activeThreshold){firstActive=Math.max(0,i-2);break}}
+for(let i=smooth.length-1;i>=0;i--){if(smooth[i]>activeThreshold){lastActive=Math.min(frames.length-1,i+2);break}}
+const baseMotion=cumulative[firstActive]||0;
+const endMotion=cumulative[lastActive]||acc;
+const totalMotion=Math.max(0,endMotion-baseMotion);
 const chosen=[];
 
 if(totalMotion>0.01){
 // 全移動量を目標ページ数で等分し、各ページに相当する移動位置を探します。
 let cursor=0;
 for(let page=0;page<target;page++){
-const wanted=totalMotion*(page+.5)/target;
-while(cursor<cumulative.length-1&&cumulative[cursor]<wanted)cursor++;
+const wanted=baseMotion+totalMotion*(page+.5)/target;
+if(cursor<firstActive)cursor=firstActive;
+while(cursor<lastActive&&cumulative[cursor]<wanted)cursor++;
 let idx=cursor;
 // 境界付近では変化中のフレームより、少し安定したフレームを優先します。
 const radius=Math.max(1,Math.round(avg/probe*.22));
 let best=idx,bestScore=Infinity;
 for(let j=Math.max(0,idx-radius);j<=Math.min(frames.length-1,idx+radius);j++){
 const motionScore=smooth[j];
+if(j<firstActive||j>lastActive)continue;
 const distancePenalty=Math.abs(cumulative[j]-wanted)/(totalMotion/target+1e-6);
 const score=motionScore+distancePenalty*.35;
 if(score<bestScore){bestScore=score;best=j}
@@ -86,7 +95,7 @@ chosen.push(frames[idx]);
 // 同一時刻が選ばれた場合は近傍へずらし、目標ページ数を維持します。
 for(let i=1;i<chosen.length;i++){
 if(chosen[i].t<=chosen[i-1].t){
-const minT=Math.min(duration-.05,chosen[i-1].t+probe);
+const minT=Math.min(frames[lastActive].t,chosen[i-1].t+probe);
 let idx=Math.min(frames.length-1,Math.max(0,Math.round(minT/probe)));
 chosen[i]=frames[idx];
 }}
