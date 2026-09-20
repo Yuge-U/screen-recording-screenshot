@@ -18,7 +18,87 @@ async function bookAutoTune(){if(!video.duration)return;const btn=$("bookAutoTun
 $("bookAutoTune").onclick=bookAutoTune;
 [["bookInterval",2],["bookChange",1]].forEach(([id,d])=>$(id).addEventListener("input",()=>$(id+"Out").textContent=Number($(id).value).toFixed(d)));
 stopBtn.onclick=()=>stopped=true;
-async function analyzeBookTarget(target){const duration=video.duration,avg=duration/target,probe=Math.max(.08,Math.min(.35,avg/3));const candidates=[];let prev=null;const total=Math.ceil(duration/probe);for(let n=0,t=0;t<duration&&!stopped;n++,t=n*probe){await seek(t);const s=sig();if(prev)candidates.push({t,s,d:diff(prev,s)});prev=s;if(n%3===0){const p=Math.min(100,Math.round((n+1)/total*100));$("progress").value=p;$("detail").textContent="ページ候補を探索 "+p+"%　候補 "+candidates.length+"件";await new Promise(r=>setTimeout(r,0))}}if(stopped)return;const windowSize=Math.max(probe*2,avg*.45),chosen=[];for(let page=0;page<target;page++){const center=Math.min(duration-.05,(page+.5)*avg);let best=null;for(const c of candidates){if(Math.abs(c.t-center)<=windowSize&&(!best||c.d>best.d))best=c}if(!best){let nearest=null;for(const c of candidates){const dist=Math.abs(c.t-center);if(!nearest||dist<nearest.dist)nearest={...c,dist};}best=nearest}if(best&&!chosen.some(x=>Math.abs(x.t-best.t)<probe*.8))chosen.push(best)}chosen.sort((a,b)=>a.t-b.t);for(let i=0;i<chosen.length&&!stopped;i++){await capture(chosen[i].t,chosen[i].s);$("progress").value=Math.round((i+1)/chosen.length*100);$("detail").textContent="ページ画像を作成 "+(i+1)+" / "+target;await new Promise(r=>setTimeout(r,0))}return chosen.length}
+async function analyzeBookTarget(target){
+const duration=video.duration;
+const avg=duration/target;
+const probe=Math.max(.06,Math.min(.22,avg/4));
+const frames=[];
+let prev=null;
+const total=Math.ceil(duration/probe);
+for(let n=0,t=0;t<duration&&!stopped;n++,t=n*probe){
+await seek(t);
+const s=sig();
+const d=prev?diff(prev,s):0;
+frames.push({t,s,d});
+prev=s;
+if(n%4===0){
+const p=Math.min(70,Math.round((n+1)/total*70));
+$("progress").value=p;
+$("detail").textContent="スクロール量を追跡 "+p+"%";
+await new Promise(r=>setTimeout(r,0));
+}}
+if(stopped)return 0;
+
+// 変化量を「移動距離」の代用として累積し、スクロール速度の変化に追従します。
+const smooth=[];
+for(let i=0;i<frames.length;i++){
+let sum=0,count=0;
+for(let k=Math.max(0,i-2);k<=Math.min(frames.length-1,i+2);k++){sum+=frames[k].d;count++}
+smooth.push(sum/count);
+}
+let cumulative=[0],acc=0;
+for(let i=1;i<frames.length;i++){
+// 小さな動画ノイズは除き、実際に動いている区間だけ累積します。
+const motion=Math.max(0,smooth[i]-.12);
+acc+=motion;
+cumulative.push(acc);
+}
+const totalMotion=acc;
+const chosen=[];
+
+if(totalMotion>0.01){
+// 全移動量を目標ページ数で等分し、各ページに相当する移動位置を探します。
+let cursor=0;
+for(let page=0;page<target;page++){
+const wanted=totalMotion*(page+.5)/target;
+while(cursor<cumulative.length-1&&cumulative[cursor]<wanted)cursor++;
+let idx=cursor;
+// 境界付近では変化中のフレームより、少し安定したフレームを優先します。
+const radius=Math.max(1,Math.round(avg/probe*.22));
+let best=idx,bestScore=Infinity;
+for(let j=Math.max(0,idx-radius);j<=Math.min(frames.length-1,idx+radius);j++){
+const motionScore=smooth[j];
+const distancePenalty=Math.abs(cumulative[j]-wanted)/(totalMotion/target+1e-6);
+const score=motionScore+distancePenalty*.35;
+if(score<bestScore){bestScore=score;best=j}
+}
+chosen.push(frames[best]);
+}
+}else{
+// 動きがほぼ検出できない場合のみ、時間基準へフォールバックします。
+for(let page=0;page<target;page++){
+const t=Math.min(duration-.05,(page+.5)*avg);
+let idx=Math.min(frames.length-1,Math.max(0,Math.round(t/probe)));
+chosen.push(frames[idx]);
+}
+}
+
+// 同一時刻が選ばれた場合は近傍へずらし、目標ページ数を維持します。
+for(let i=1;i<chosen.length;i++){
+if(chosen[i].t<=chosen[i-1].t){
+const minT=Math.min(duration-.05,chosen[i-1].t+probe);
+let idx=Math.min(frames.length-1,Math.max(0,Math.round(minT/probe)));
+chosen[i]=frames[idx];
+}}
+for(let i=0;i<chosen.length&&!stopped;i++){
+await capture(chosen[i].t,chosen[i].s);
+$("progress").value=70+Math.round((i+1)/chosen.length*30);
+$("detail").textContent="ページ画像を作成 "+(i+1)+" / "+target;
+await new Promise(r=>setTimeout(r,0));
+}
+return chosen.length;
+}
+
 start.onclick=async()=>{stopped=false;start.disabled=true;stopBtn.disabled=false;$("results").innerHTML="";shots.forEach(x=>URL.revokeObjectURL(x.u));shots=[];$("count").textContent="0枚";updatePdfButtons();$("status").textContent=mode==="book"?"本・連続スクロール解析中…":"解析中…";try{
 if(mode==="book"){const target=parseInt($("targetPages").value,10)||0;if(target>0){const found=await analyzeBookTarget(target);if(!stopped)$("detail").textContent="目標 "+target+"ページ / 抽出 "+found+"ページ / 差 "+(target-found)+"ページ"}else{const step=+$("bookInterval").value,minChange=+$("bookChange").value;let last=null;const total=Math.ceil(video.duration/step);for(let n=0,t=0;t<video.duration&&!stopped;n++,t=n*step){await seek(t);const s=sig();if(!last||diff(last,s)>=minChange){await capture(t,s);last=s}const p=Math.min(100,Math.round((n+1)/total*100));$("progress").value=p;$("detail").textContent=p+"%　"+fmt(t)+" / "+fmt(video.duration)+"　検出 "+shots.length+"枚";await new Promise(r=>setTimeout(r,0))}}}
 else{const step=+$("interval").value,stableTh=+$("stable").value,changeTh=+$("change").value,dupTh=+$("dup").value;let prev=null,last=null,changed=true,stableN=0;const total=Math.ceil(video.duration/step);for(let n=0,t=0;t<video.duration&&!stopped;n++,t=n*step){await seek(t);const s=sig(),d=diff(prev,s);if(prev){if(d>=changeTh){changed=true;stableN=0}else if(d<=stableTh)stableN++;else stableN=0}if(changed&&stableN>=2){if(!last||diff(last,s)>=dupTh){await capture(t,s);last=s}changed=false;stableN=0}prev=s;const p=Math.min(100,Math.round((n+1)/total*100));$("progress").value=p;$("detail").textContent=p+"%　"+fmt(t)+" / "+fmt(video.duration)+"　検出 "+shots.length+"枚";await new Promise(r=>setTimeout(r,0))}}
