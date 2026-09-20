@@ -118,4 +118,15 @@ $("selectAll").onclick=()=>document.querySelectorAll(".shotPick").forEach(x=>x.c
 $("clearAll").onclick=()=>document.querySelectorAll(".shotPick").forEach(x=>x.checked=false);
 function blobToDataURL(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(blob)})}
 $("makePdf").onclick=async()=>{const selected=[...document.querySelectorAll(".shotPick:checked")].map(x=>shots[+x.dataset.index]);if(!selected.length){$("status").textContent="PDFにする画像を選択してください";return}const old=$("makePdf").textContent;$("makePdf").disabled=true;$("makePdf").textContent="PDF作成中…";try{const {jsPDF}=window.jspdf;let pdf=null;for(let i=0;i<selected.length;i++){const sh=selected[i],data=await blobToDataURL(sh.blob);const img=new Image();await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=data});const portrait=img.height>=img.width;const orientation=portrait?"p":"l";const w=portrait?210:297,h=portrait?297:210;if(!pdf)pdf=new jsPDF({orientation,unit:"mm",format:"a4",compress:true});else pdf.addPage("a4",orientation);const scale=Math.min(w/img.width,h/img.height),iw=img.width*scale,ih=img.height*scale;pdf.addImage(data,"JPEG",(w-iw)/2,(h-ih)/2,iw,ih,undefined,"FAST");$("detail").textContent="PDF作成中 "+(i+1)+" / "+selected.length}pdf.save("screen-recording-"+new Date().toISOString().slice(0,10)+".pdf");$("status").textContent="PDF作成完了 ✓";$("detail").textContent=selected.length+"枚を順番にPDFへまとめました"}catch(e){$("status").textContent="PDF作成に失敗しました";$("detail").textContent=e.message}finally{$("makePdf").disabled=false;$("makePdf").textContent=old}};
-if("serviceWorker"in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("./service-worker.js").catch(()=>{}));
+if("serviceWorker"in navigator){
+window.addEventListener("load",async()=>{
+try{
+const regs=await navigator.serviceWorker.getRegistrations();
+await Promise.all(regs.map(r=>r.unregister()));
+if("caches"in window){
+const keys=await caches.keys();
+await Promise.all(keys.filter(k=>k.startsWith("screen-shot-")).map(k=>caches.delete(k)));
+}
+}catch(e){}
+});
+}
